@@ -1,0 +1,142 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_PACKETS 100
+#define MAX_NAME_LEN 20
+#define TOTAL_DATA_LIMIT (10 * 1024 * 1024) // Total data limit in KB (10 GB)
+
+typedef struct {
+    char name[MAX_NAME_LEN];
+    int priority; // Priority from 0 to 9
+    int requestedData; // Data requested in KB
+    int remainingData; // Remaining data needed for this client in KB
+} Packet;
+
+typedef struct {
+    Packet packets[MAX_PACKETS];
+    int front, rear;
+    int size;
+} Queue;
+
+void initQueue(Queue *q) {
+    q->front = 0;
+    q->rear = -1;
+    q->size = 0;
+}
+
+int isFull(Queue *q) {
+    return q->size == MAX_PACKETS;
+}
+
+int isEmpty(Queue *q) {
+    return q->size == 0;
+}
+
+void enqueue(Queue *q, Packet packet) {
+    if (!isFull(q)) {
+        q->rear = (q->rear + 1) % MAX_PACKETS;
+        q->packets[q->rear] = packet;
+        q->size++;
+    } else {
+        printf("Queue is full! Cannot enqueue packet from %s\n", packet.name);
+    }
+}
+
+Packet dequeue(Queue *q) {
+    Packet packet = q->packets[q->front];
+    q->front = (q->front + 1) % MAX_PACKETS;
+    q->size--;
+    return packet;
+}
+
+void processPacket(Packet *packet, int *remainingData, int quantum) {
+    if (packet->remainingData > 0) {
+        int consumeAmount = (packet->remainingData < quantum) ? packet->remainingData : quantum;
+        if (consumeAmount <= *remainingData) {
+            *remainingData -= consumeAmount;
+            packet->remainingData -= consumeAmount;
+            printf("Processing packet from %s (Priority: %d, Consumed: %d KB). Client needs: %d KB\n", 
+                   packet->name, packet->priority, consumeAmount, packet->remainingData);
+        } else {
+            printf("Insufficient remaining data for %s (Priority: %d). Requested: %d KB\n", 
+                   packet->name, packet->priority, consumeAmount);
+        }
+    }
+}
+
+void roundRobinWithPriority(Queue *queues[], int *remainingData, int quantum) {
+    int i, j;
+    while (1) {
+        int allEmpty = 1;
+        for (i = 0; i < 10; i++) {
+            if (!isEmpty(queues[i])) {
+                allEmpty = 0; // At least one queue is not empty
+                Packet packet = dequeue(queues[i]);
+                processPacket(&packet, remainingData, quantum);
+                if (packet.remainingData > 0) {
+                    enqueue(queues[i], packet); // Re-enqueue if there's remaining data
+                }
+            }
+        }
+        if (allEmpty) break; // Exit if all queues are empty
+    }
+}
+
+int main() {
+    Queue *queues[10];
+    for (int i = 0; i < 10; i++) {
+        queues[i] = malloc(sizeof(Queue));
+        initQueue(queues[i]);
+    }
+
+    int remainingData = TOTAL_DATA_LIMIT; // Initialize remaining data
+    int quantum;
+
+    // User input for quantum
+    printf("Enter the quantum time in KB (e.g., 100): ");
+    scanf("%d", &quantum);
+
+    int numClients;
+    printf("Enter the number of clients: ");
+    scanf("%d", &numClients);
+
+    for (int i = 0; i < numClients; i++) {
+        char name[MAX_NAME_LEN];
+        int priority;
+        float requestedDataGB;
+
+        printf("Enter name for Client %d: ", i + 1);
+        scanf("%s", name);
+        do {
+            printf("Enter priority for Client %d (0-9): ", i + 1);
+            scanf("%d", &priority);
+        } while (priority < 0 || priority > 9);
+
+        printf("Enter requested data for Client %d in GB: ", i + 1);
+        scanf("%f", &requestedDataGB);
+
+        // Convert requested data from GB to KB
+        int requestedData = (int)(requestedDataGB * 1024 * 1024); // Convert GB to KB
+
+        // Create the packet
+        Packet packet = {0};
+        strncpy(packet.name, name, MAX_NAME_LEN);
+        packet.priority = priority;
+        packet.requestedData = requestedData;
+        packet.remainingData = requestedData; // Initialize remaining data
+
+        // Enqueue based on priority
+        enqueue(queues[priority], packet);
+    }
+
+    // Start processing packets
+    roundRobinWithPriority(queues, &remainingData, quantum);
+
+    // Free allocated memory for queues
+    for (int i = 0; i < 10; i++) {
+        free(queues[i]);
+    }
+
+    return 0;
+}
